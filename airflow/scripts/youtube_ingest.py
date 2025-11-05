@@ -165,7 +165,7 @@ class YouTubeDataIngestor:
 
 def main():
     # Configuration
-    API_KEY = os.getenv('YOUTUBE_API_KEY', 'AIzaSyAKWJ_Z2F8ORTgT36_t6yIZaUpYVg3by28')
+    API_KEY = os.getenv('YOUTUBE_API_KEY')
     CHANNEL_ID = os.getenv('YOUTUBE_CHANNEL_ID', 'UCE4eioDmSOwZi3sW3-QeiaA')
     
     if not API_KEY:

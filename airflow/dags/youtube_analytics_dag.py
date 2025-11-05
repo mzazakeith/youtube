@@ -38,7 +38,7 @@ dag = DAG(
 def get_env_vars():
     """Get environment variables for the pipeline."""
     return {
-        'YOUTUBE_API_KEY': Variable.get('YOUTUBE_API_KEY', default_var='AIzaSyAKWJ_Z2F8ORTgT36_t6yIZaUpYVg3by28'),
+        'YOUTUBE_API_KEY': Variable.get('YOUTUBE_API_KEY'),
         'YOUTUBE_CHANNEL_ID': Variable.get('YOUTUBE_CHANNEL_ID', default_var='UCWpxNm3hgndKBhwnnrVsFkA'),
         'POSTGRES_HOST': Variable.get('POSTGRES_HOST', default_var='postgres'),
         'POSTGRES_PORT': Variable.get('POSTGRES_PORT', default_var='5432'),
