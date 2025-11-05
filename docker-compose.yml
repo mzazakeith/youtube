@@ -1,0 +1,227 @@
+
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: youtube_postgres
+    environment:
+      POSTGRES_DB: youtube_analytics
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - youtube_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d youtube_analytics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Airflow
+  redis:
+    image: redis:7-alpine
+    container_name: youtube_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - youtube_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build: .
+    image: youtube-analytics-airflow:latest
+    container_name: youtube_airflow_scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/youtube_analytics
+      - AIRFLOW__CORE__FERNET_KEY=NUs8vafjSoO8Br30S1YkA29pzPtZQOcUTj99XHd5R8A=
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=redis://redis:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - AIRFLOW_CONN_POSTGRES_DEFAULT=postgresql://airflow:airflow@postgres:5432/youtube_analytics
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/scripts:/opt/airflow/scripts
+      - ./airflow/logs:/opt/airflow/logs
+      - ./sql:/opt/airflow/sql
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+      - ./data:/opt/airflow/data
+    networks:
+      - youtube_network
+    command: ["bash", "-c", "pip install uv -q && airflow scheduler"]
+
+  # Airflow Worker
+  airflow-worker:
+    build: .
+    image: youtube-analytics-airflow:latest
+    container_name: youtube_airflow_worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/youtube_analytics
+      - AIRFLOW__CORE__FERNET_KEY=NUs8vafjSoO8Br30S1YkA29pzPtZQOcUTj99XHd5R8A=
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=redis://redis:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW_CONN_POSTGRES_DEFAULT=postgresql://airflow:airflow@postgres:5432/youtube_analytics
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/scripts:/opt/airflow/scripts
+      - ./airflow/logs:/opt/airflow/logs
+      - ./sql:/opt/airflow/sql
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+      - ./data:/opt/airflow/data
+    networks:
+      - youtube_network
+    command: ["bash", "-c", "pip install uv -q && airflow celery worker"]
+
+  # Airflow Webserver
+  airflow-webserver:
+    build: .
+    image: youtube-analytics-airflow:latest
+    container_name: youtube_airflow_webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/youtube_analytics
+      - AIRFLOW__CORE__FERNET_KEY=NUs8vafjSoO8Br30S1YkA29pzPtZQOcUTj99XHd5R8A=
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=redis://redis:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - AIRFLOW_CONN_POSTGRES_DEFAULT=postgresql://airflow:airflow@postgres:5432/youtube_analytics
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/scripts:/opt/airflow/scripts
+      - ./airflow/logs:/opt/airflow/logs
+      - ./sql:/opt/airflow/sql
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+      - ./data:/opt/airflow/data
+    networks:
+      - youtube_network
+    command: ["bash", "-c", "pip install uv -q && airflow webserver"]
+
+  # Airflow Init
+  airflow-init:
+    build: .
+    image: youtube-analytics-airflow:latest
+    container_name: youtube_airflow_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/youtube_analytics
+      - AIRFLOW__CORE__FERNET_KEY=NUs8vafjSoO8Br30S1YkA29pzPtZQOcUTj99XHd5R8A=
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=redis://redis:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=nTAu9sPMamOLw7bjnJJ1eLVJtlayRmyLGEMfdE_aBmU
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/scripts:/opt/airflow/scripts
+      - ./sql:/opt/airflow/sql
+      - ./pyproject.toml:/opt/airflow/pyproject.toml
+    networks:
+      - youtube_network
+    command: version
+    entrypoint: ["/bin/bash", "-c"]
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: youtube_grafana
+    depends_on:
+      - postgres
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - youtube_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Spark Master
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: youtube_spark_master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8081:8081"
+      - "7077:7077"
+    volumes:
+      - ./data:/opt/bitnami/spark/data
+      - ./scripts:/opt/bitnami/spark/scripts
+    networks:
+      - youtube_network
+
+  # Spark Worker
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: youtube_spark_worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    volumes:
+      - ./data:/opt/bitnami/spark/data
+      - ./scripts:/opt/bitnami/spark/scripts
+    networks:
+      - youtube_network
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+networks:
+  youtube_network:
+    driver: bridge

@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""
+Load processed YouTube analytics data into PostgreSQL.
+Upserts channel stats and videos data with proper conflict handling.
+"""
+
+import os
+import sys
+import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime
+import psycopg2
+from psycopg2.extras import execute_values
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class PostgresLoader:
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self.engine = create_engine(connection_string)
+        
+    def execute_schema(self, schema_file: str = "sql/schema.sql"):
+        """Execute database schema creation."""
+        try:
+            with open(schema_file, 'r') as f:
+                schema_sql = f.read()
+            
+            with self.engine.connect() as conn:
+                conn.execute(text(schema_sql))
+                conn.commit()
+            
+            logger.info("Database schema created/updated successfully")
+            
+        except Exception as e:
+            logger.error(f"Error executing schema: {e}")
+            raise
+    
+    def upsert_channel_stats(self, df: pd.DataFrame):
+        """Upsert channel statistics data."""
+        if df.empty:
+            logger.warning("No channel stats data to upsert")
+            return
+        
+        try:
+            with self.engine.connect() as conn:
+                # Create temporary table for upsert
+                temp_table = "temp_channel_stats"
+                df.to_sql(temp_table, conn, if_exists='replace', index=False)
+                
+                # Upsert query
+                upsert_query = f"""
+                INSERT INTO channel_stats (captured_at, channel_id, channel_title, subscribers, total_views, video_count)
+                SELECT captured_at, channel_id, channel_title, subscribers, total_views, video_count
+                FROM {temp_table}
+                ON CONFLICT (channel_id, captured_at) 
+                DO UPDATE SET
+                    channel_title = EXCLUDED.channel_title,
+                    subscribers = EXCLUDED.subscribers,
+                    total_views = EXCLUDED.total_views,
+                    video_count = EXCLUDED.video_count,
+                    created_at = CURRENT_TIMESTAMP
+                """
+                
+                conn.execute(text(upsert_query))
+                conn.commit()
+                
+                # Drop temporary table
+                conn.execute(text(f"DROP TABLE IF EXISTS {temp_table}"))
+                conn.commit()
+                
+            logger.info(f"Upserted {len(df)} channel stats records")
+            
+        except Exception as e:
+            logger.error(f"Error upserting channel stats: {e}")
+            raise
+    
+    def upsert_videos(self, df: pd.DataFrame):
+        """Upsert videos data."""
+        if df.empty:
+            logger.warning("No videos data to upsert")
+            return
+        
+        try:
+            with self.engine.connect() as conn:
+                # Create temporary table for upsert
+                temp_table = "temp_videos"
+                df.to_sql(temp_table, conn, if_exists='replace', index=False)
+                
+                # Upsert query
+                upsert_query = f"""
+                INSERT INTO videos (
+                    video_id, title, publish_time, views, likes, comments, 
+                    engagement_rate, publish_day, publish_hour, likes_per_view,
+                    comments_per_view, views_per_day, publish_date, 
+                    publish_day_of_week, publish_month
+                )
+                SELECT 
+                    video_id, title, publish_time, views, likes, comments, 
+                    engagement_rate, publish_day, publish_hour, likes_per_view,
+                    comments_per_view, views_per_day, publish_date, 
+                    publish_day_of_week, publish_month
+                FROM {temp_table}
+                ON CONFLICT (video_id) 
+                DO UPDATE SET
+                    title = EXCLUDED.title,
+                    views = EXCLUDED.views,
+                    likes = EXCLUDED.likes,
+                    comments = EXCLUDED.comments,
+                    engagement_rate = EXCLUDED.engagement_rate,
+                    publish_day = EXCLUDED.publish_day,
+                    publish_hour = EXCLUDED.publish_hour,
+                    likes_per_view = EXCLUDED.likes_per_view,
+                    comments_per_view = EXCLUDED.comments_per_view,
+                    views_per_day = EXCLUDED.views_per_day,
+                    publish_date = EXCLUDED.publish_date,
+                    publish_day_of_week = EXCLUDED.publish_day_of_week,
+                    publish_month = EXCLUDED.publish_month,
+                    updated_at = CURRENT_TIMESTAMP
+                """
+                
+                conn.execute(text(upsert_query))
+                conn.commit()
+                
+                # Drop temporary table
+                conn.execute(text(f"DROP TABLE IF EXISTS {temp_table}"))
+                conn.commit()
+                
+            logger.info(f"Upserted {len(df)} video records")
+            
+        except Exception as e:
+            logger.error(f"Error upserting videos: {e}")
+            raise
+    
+    def load_from_parquet(self, channel_path: str, videos_path: str):
+        """Load data from Parquet files and upsert to PostgreSQL."""
+        try:
+            # Load channel data
+            if os.path.exists(channel_path):
+                channel_df = pd.read_parquet(channel_path)
+                self.upsert_channel_stats(channel_df)
+            else:
+                logger.warning(f"Channel file not found: {channel_path}")
+            
+            # Load videos data
+            if os.path.exists(videos_path):
+                videos_df = pd.read_parquet(videos_path)
+                self.upsert_videos(videos_df)
+            else:
+                logger.warning(f"Videos file not found: {videos_path}")
+                
+        except Exception as e:
+            logger.error(f"Error loading from Parquet: {e}")
+            raise
+    
+    def get_summary_stats(self):
+        """Get summary statistics from the database."""
+        try:
+            with self.engine.connect() as conn:
+                # Channel stats
+                channel_query = """
+                SELECT channel_title, subscribers, total_views, video_count, captured_at
+                FROM channel_stats 
+                ORDER BY captured_at DESC 
+                LIMIT 1
+                """
+                channel_result = conn.execute(text(channel_query)).fetchone()
+                
+                # Video stats
+                video_query = """
+                SELECT 
+                    COUNT(*) as total_videos,
+                    SUM(views) as total_views,
+                    AVG(views) as avg_views,
+                    MAX(views) as max_views,
+                    AVG(engagement_rate) as avg_engagement_rate
+                FROM videos
+                """
+                video_result = conn.execute(text(video_query)).fetchone()
+                
+                return {
+                    "channel": dict(channel_result._mapping) if channel_result else None,
+                    "videos": dict(video_result._mapping) if video_result else None
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting summary stats: {e}")
+            return None
+
+def find_latest_parquet(directory: str, pattern: str):
+    """Find the latest Parquet file matching the pattern."""
+    if not os.path.exists(directory):
+        return None
+    
+    files = [f for f in os.listdir(directory) if pattern in f and f.endswith('.parquet')]
+    if not files:
+        return None
+    
+    # Sort by modification time
+    files.sort(key=lambda x: os.path.getmtime(os.path.join(directory, x)), reverse=True)
+    return os.path.join(directory, files[0])
+
+def main():
+    # Database connection
+    db_host = os.getenv('POSTGRES_HOST', 'localhost')
+    db_port = os.getenv('POSTGRES_PORT', '5432')
+    db_name = os.getenv('POSTGRES_DB', 'youtube_analytics')
+    db_user = os.getenv('POSTGRES_USER', 'airflow')
+    db_password = os.getenv('POSTGRES_PASSWORD', 'airflow')
+    
+    connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    
+    logger.info("Starting PostgreSQL data load")
+    
+    try:
+        # Initialize loader
+        loader = PostgresLoader(connection_string)
+        
+        # Execute schema
+        logger.info("Creating/updating database schema...")
+        loader.execute_schema()
+        
+        # Find latest processed files
+        channel_file = find_latest_parquet("data/processed", "channel_stats")
+        videos_file = find_latest_parquet("data/processed", "videos")
+        
+        if not channel_file and not videos_file:
+            logger.error("No processed data files found")
+            return
+        
+        # Load data
+        logger.info("Loading data into PostgreSQL...")
+        loader.load_from_parquet(channel_file, videos_file)
+        
+        # Get summary stats
+        logger.info("Getting summary statistics...")
+        stats = loader.get_summary_stats()
+        
+        if stats:
+            logger.info("Load completed successfully!")
+            if stats["channel"]:
+                ch = stats["channel"]
+                logger.info(f"Channel: {ch['channel_title']}")
+                logger.info(f"Subscribers: {ch['subscribers']:,}")
+                logger.info(f"Total Views: {ch['total_views']:,}")
+            
+            if stats["videos"]:
+                v = stats["videos"]
+                logger.info(f"Total Videos: {v['total_videos']:,}")
+                logger.info(f"Average Views: {v['avg_views']:,.0f}")
+                logger.info(f"Average Engagement Rate: {v['avg_engagement_rate']:.4f}")
+        
+    except Exception as e:
+        logger.error(f"Error during data load: {e}")
+        raise
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,28 @@
+[project]
+name = "youtube-analytics-dashboard"
+version = "0.1.0"
+description = "End-to-End YouTube Channel Analytics Pipeline"
+authors = [
+    {name = "YouTube Analytics Team"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "pyspark>=3.4.0",
+    "pandas>=2.0.0",
+    "SQLAlchemy>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "apache-airflow>=2.7.0",
+    "python-dotenv>=1.0.0"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0"
+]
